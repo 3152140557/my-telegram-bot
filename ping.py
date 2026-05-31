@@ -5,10 +5,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQ
     InputTextMessageContent
 from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler, ContextTypes
-from telegram.utils.helpers import create_deep_linked_url
+from telegram.helpers import create_deep_linked_url  # 💡 已经修正为最新版官方标准路径
 
 # ==================== 🛠️ 智能环境自适应区 ====================
-# 自动检测是在本地 Windows 调试还是在 Linux 云端运行
 IS_LOCAL = sys.platform == 'win32'
 
 if IS_LOCAL:
@@ -34,7 +33,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     context.user_data['click_count'] = 0
     if context.args:
-        referrer_id = context.args[0]
+        referrer_id = context.args
         logging.info(f"🔥【裂变报喜】新用户 {user_id} 是通过用户 {referrer_id} 的助力链接点进来的！")
 
     keyboard = [[InlineKeyboardButton("🎰 点击开始免费抽奖 🎰", callback_data="draw_lottery")]]
@@ -147,13 +146,10 @@ def main():
     app.add_handler(CallbackQueryHandler(button_click, pattern="^draw_lottery$"))
     app.add_handler(InlineQueryHandler(inline_query_handler))
 
-    # 💡 核心自适应部署逻辑
     if IS_LOCAL:
-        # 本地电脑继续采用 Polling 模式调试
         print("🚀 本地调试模式启动成功...")
         app.run_polling()
     else:
-        # Render 云端自动转换为 Webhook 模式，绑定 Render 提供的端口和 URL
         PORT = int(os.environ.get("PORT", 8443))
         RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
@@ -161,7 +157,7 @@ def main():
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
-            secret_token="pdd_bot_secure_token_123",  # 密钥
+            secret_token="pdd_bot_secure_token_123",
             url_path=BOT_TOKEN,
             webhook_url=f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
         )
