@@ -35,10 +35,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # ==================== 💾 SQLite 数据库核心控制区 ====================
 def init_db():
-    """初始化数据库，创建用户表"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # users表：用户ID，剩余能量，点击次数
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -51,7 +49,6 @@ def init_db():
 
 
 def get_or_create_user(user_id):
-    """获取或创建用户，默认赠送 20 能量"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT energy, click_count FROM users WHERE user_id = ?", (user_id,))
@@ -67,7 +64,6 @@ def get_or_create_user(user_id):
 
 
 def update_user_click(user_id, new_count, new_energy):
-    """更新用户的点击次数和能量值"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET click_count = ?, energy = ? WHERE user_id = ?", (new_count, new_energy, user_id))
@@ -76,10 +72,8 @@ def update_user_click(user_id, new_count, new_energy):
 
 
 def add_user_energy(user_id, amount):
-    """为指定用户增加能量值"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # 先确保用户存在
     cursor.execute("SELECT energy FROM users WHERE user_id = ?", (user_id,))
     if cursor.fetchone():
         cursor.execute("UPDATE users SET energy = energy + ? WHERE user_id = ?", (amount, user_id))
@@ -91,169 +85,173 @@ def add_user_energy(user_id, amount):
 
 # ====================================================================
 
-# 输入 /start 启动（核心裂变识别点）
+# 输入 /start 启动
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
 
-    # 获取当前用户的数据库状态
     energy, _ = get_or_create_user(user_id)
 
-    # 💡 核心裂变监控：检查是不是通过别人的邀请链接（/start referrer_id）进来的
+    # 裂变检测
     if context.args:
         try:
-            referrer_id = int(context.args[0])
-            # 防止自己给自己助力
+            referrer_id = int(context.args)
             if referrer_id != user_id:
-                # 1. 数据库执行核心加能量操作：为邀请人 +10 能量
                 add_user_energy(referrer_id, 10)
-                logging.info(f"🔥【裂变成功】新用户 {user_id}({user_name}) 为邀请人 {referrer_id} 成功助力！")
+                logging.info(f"🔥【裂变成功】新用户 {user_id} 为邀请人 {referrer_id} 成功助力！")
 
-                # 2. 实时发送私信通知给邀请人，仪式感拉满！
+                # 给邀请人发私信
                 try:
                     notify_text = (
                         "🔔 【裂变助力报喜】\n"
                         "──────────────────\n"
-                        f"✨ 您的好友【{user_name}】已通过您分享的卡片成功加入！\n\n"
+                        f"✨ 您的好友【{user_name}】已为您助力成功！\n\n"
                         "🎁 恭喜获得：+10 抽奖能量！\n"
-                        "📈 提现进度已从 99.99% 解锁更新为：【99.995%】！\n\n"
-                        "⚡ 提现通道已重新为您开启，快点击下方按钮继续破关！"
+                        "📈 提现进度已更新为：【99.995%】！\n\n"
+                        "⚡ 能量已到账，快点击下方按钮继续开盘！"
                     )
-                    keyboard = [[InlineKeyboardButton("🎰 回到控制台继续提现", callback_data="draw_lottery")]]
+                    keyboard = [[InlineKeyboardButton("🎰 进入娱乐城继续提现", callback_data="draw_lottery")]]
                     await context.bot.send_message(chat_id=referrer_id, text=notify_text,
                                                    reply_markup=InlineKeyboardMarkup(keyboard))
                 except Exception as e:
-                    logging.error(f"向邀请人发送通知失败（可能由于邀请人删除了Bot）: {e}")
+                    logging.error(f"通知邀请人失败: {e}")
         except ValueError:
-            pass  # 规避非数字参数带来的异常
+            pass
 
-    keyboard = [[InlineKeyboardButton("🎰 点击开始免费抽奖 🎰", callback_data="draw_lottery")]]
+    keyboard = [[InlineKeyboardButton("🎰 启动免费老虎机 🎰", callback_data="draw_lottery")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     welcome_text = (
-        "🔥 【官方粉丝特惠回馈中心】\n"
+        f"🔥 【官方至尊娱乐城 · 福利回馈】\n"
         "──────────────────\n"
-        f"👑 欢迎您，{user_name}！\n"
-        f"⚡ 当前可用抽奖能量：{energy} 点\n"
-        "🎁 奖池包含：iPhone 16 Pro Max、万元现金等大奖！\n\n"
-        "⏰ 账户资金提现通道已开通，点击下方按钮开始！"
+        f"👑 尊贵的会员【{user_name}】，欢迎入场！\n"
+        f"🔋 当前可用幸运能量：{energy} 点\n\n"
+        "🎁 头等大奖：iPhone 16 Pro Max 现金券（100%必中）\n"
+        "👇 赶快点击下方按钮，摇动你的超级老虎机吧！"
     )
     await update.message.reply_text(text=welcome_text, reply_markup=reply_markup)
 
 
-# 按钮点击逻辑
+# 核心小游戏与点击判定逻辑
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
 
-    # 每次点击，从数据库读取最新最真实的数据
     energy, count = get_or_create_user(user_id)
-
-    # 拼多多经典的“卡点消耗”套路：每次点击次数自增，同时消耗 10 点能量
     count += 1
 
+    # 🕹️ 第一次摇老虎机：摇出普通图案，提示差一点，送翻倍卡
     if count == 1:
-        energy = max(0, energy - 10)  # 消耗 10 能量
-        update_user_click(user_id, count, energy)
+        await query.answer(text="🎰 老虎机正在疯狂旋转中...")
+        await query.message.delete()  # 删掉欢迎语
 
-        await query.answer(text="🎉 🎉 🎉 恭喜你中奖啦！！！ 🎉 🎉 🎉")
-        await query.message.reply_text("🎊 🎊 🎊 🎊 🎊 🎊 🎊 🎊\n🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉")
+        # 发送一个纯原生的、正在旋转的老虎机骰子！
+        # emoji="slot_machine" 会在用户手机上展示真正的滚动特效
+        msg = await context.bot.send_dice(chat_id=query.message.chat_id, emoji="slot_machine")
+
+        # 故意等待 2.5 秒，让手机端的老虎机滚动动画完全播放完毕
+        await asyncio.sleep(2.5)
+
+        energy = max(0, energy - 10)
+        update_user_click(user_id, count, energy)
 
         text = (
-            "💎 【中奖通知：特等奖】\n"
+            "❌ 【哎呀，差一点点！】\n"
             "──────────────────\n"
-            "恭喜抽中：【iPhone 16 Pro Max 256G 兑换券】一份！\n\n"
-            "💰 当前提现进度：已完成 99.9%\n"
-            "⚠️ 系统提示：由于微信/支付宝限额，只需再凑齐 0.1 元即可立提到账！"
+            "刚刚摇出了普通组合，未能直接清空奖池。\n\n"
+            "🎁 触发保底机制：恭喜获得【特等奖概率翻倍卡】x1！\n"
+            f"🔋 剩余能量：{energy} 点（下次抽奖将100%爆出大奖！）"
         )
-        button_text = f"⚡ 消耗10能量，免费抽取最后 0.1 元（当前能量:{energy}）"
-        keyboard = [[InlineKeyboardButton(button_text, callback_data="draw_lottery")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [[InlineKeyboardButton("⚡ 消耗最后10能量·必定中奖 ⚡", callback_data="draw_lottery")]]
+        await context.bot.send_message(chat_id=query.message.chat_id, text=text,
+                                       reply_markup=InlineKeyboardMarkup(keyboard))
 
-        try:
-            await query.message.reply_text(text=text, reply_markup=reply_markup)
-            await query.delete_message()
-        except BadRequest:
-            pass
-
+    # 🕹️ 第二次摇老虎机：天选之子！100%爆出三个7或三个金币大奖！
     elif count == 2:
         if energy < 10:
-            # 如果能量中途不够了，直接拦截提前进入裂变阶段
-            count = 3
+            count = 3  # 能量不足直接跳过
         else:
-            energy = max(0, energy - 10)  # 再次消耗 10 能量，此时能量刚好归零
+            await query.answer(text="🎰 翻倍卡已激活！正在为您锁定中奖图案...")
+            await query.message.delete()
+
+            # 再次发送老虎机
+            await context.bot.send_dice(chat_id=query.message.chat_id, emoji="slot_machine")
+            await asyncio.sleep(2.5)
+
+            energy = max(0, energy - 10)
             update_user_click(user_id, count, energy)
 
-            await query.answer(text="⚡ 正在为您疯狂暴击中...")
+            # 全屏炸开彩带特效提示中奖
+            await context.bot.send_message(chat_id=query.message.chat_id,
+                                           text="🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉\n🎰 恭喜！老虎机大奖已爆出！ 🎰")
+
             text = (
-                "🔥 【运气爆棚！提现暴击！】\n"
+                "🎉 🎉【恭喜斩获至尊特等奖】🎉 🎉\n"
                 "──────────────────\n"
-                "刚才一击为您成功抽中：0.09 元！\n\n"
-                "📈 当前总进度已达：【99.99%】\n"
-                f"🔋 剩余可用能量：{energy} 点\n\n"
-                "还差最后的【0.01 元】即可打破锁定，资金立刻全额汇入钱包！"
+                "🎰 您的老虎机成功摇出【7 7 7】至尊满贯图案！\n"
+                "🎁 获得奖品：【iPhone 16 Pro Max 256G】现金全额券！\n\n"
+                "💰 当前资金提现进度：已达成 99.99%\n"
+                "⚠️ 系统风控提示：由于金额过大，只需凑齐最后【0.01元】即可立即提现到账！"
             )
-            button_text = f"🚀 消耗 10 能量，抽取最后 0.01 元 🚀"
+            button_text = "🚀 消耗 10 能量，抽取最后 0.01 元 🚀"
             keyboard = [[InlineKeyboardButton(button_text, callback_data="draw_lottery")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            try:
-                await query.edit_message_text(text=text, reply_markup=reply_markup)
-            except BadRequest:
-                pass
+            await context.bot.send_message(chat_id=query.message.chat_id, text=text,
+                                           reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
+    # 🕹️ 第三次点击及以上：经典的能量耗尽卡关，进入裂变一键转发
     if count >= 3:
-        # 能量不足，强行卡关拦截，展示裂变转发
         update_user_click(user_id, count, energy)
-        await query.answer(text="❌ 今日抽奖能量耗尽！由于进度高达99.99%，提现已被暂时锁定！", show_alert=True)
+        await query.answer(text="❌ 槽位能量耗尽！提现已被锁定在 99.99%！", show_alert=True)
 
         share_url = create_deep_linked_url(BOT_USERNAME, str(user_id))
-        share_text = f"🎁 我正在参加抽 iPhone 16 活动，已经拿到 99.99% 了！快帮我点一下助力，你也能拿一台！"
+        share_text = f"🎁 我在至尊娱乐城摇老虎机中了 iPhone 16 Pro Max！已经拿到 99.99% 了！快帮我点一下助力，你也能白嫖一台！"
 
         keyboard = [[InlineKeyboardButton("📢 一键转发给 TG 好友/群聊助力", switch_inline_query=f"\n{share_text}\n{share_url}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         text = (
-            "❌ 【您的今日抽奖能量已耗尽】\n"
+            "❌ 【您的幸运抽奖能量已耗尽】\n"
             "──────────────────\n"
             "🔒 提现通道当前锁定在：【99.99%】\n"
-            f"🔋 当前可用能量：{energy} 点（抽奖每次需消耗 10 点）\n\n"
-            "👇 点击下方按钮转发到任意 TG 好友或群聊，只要有 1 个好友点击链接进入，您即可瞬间获得 +10 能量打破锁定，直接提现！\n\n"
+            f"🔋 当前可用能量：{energy} 点（每次充能启动需 10 点）\n\n"
+            "👇 点击下方按钮转发到任意 TG 好友或群聊，只要有 1 个好友点击链接进入，您即可瞬间获得 +10 能量直接开盘提现！\n\n"
             "您的专属助力链接：\n"
             f"{share_url}"
         )
         try:
             await query.edit_message_text(text=text, reply_markup=reply_markup)
         except BadRequest:
-            pass
+            # 如果原消息是发送的骰子无法直接被修改文字，则新发一条消息拦截
+            await context.bot.send_message(chat_id=query.message.chat_id, text=text, reply_markup=reply_markup)
 
 
-# 处理内联卡片一键转发
+# 内联卡片一键转发
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.inline_query.from_user.id
     share_url = create_deep_linked_url(BOT_USERNAME, str(user_id))
     message_content = (
-        f"🔥 帮我点一下！还差 0.01 就能提现 iPhone 16 Pro Max 了！\n\n"
+        f"🔥 帮我点一下！还差 0.01 就能提现老虎机中的 iPhone 16 Pro Max 了！\n\n"
         f"🎁 点击下方链接帮我助力，你也可以免费获得 1 次 100% 中奖机会！\n👇 👇 👇\n{share_url}"
     )
     results = [
         InlineQueryResultArticle(
             id="pdd_share",
-            title="🎁 点击发送拼多多抽奖助力卡片",
+            title="🎁 点击发送至尊老虎机中奖助力卡片",
             input_message_content=InputTextMessageContent(message_content),
-            description="点击即可将你的专属抽奖助力链接发送给当前好友或群聊"
+            description="点击即可将你的专属老虎机中奖助力卡片发送给当前好友或群聊"
         )
     ]
     await update.inline_query.answer(results, cache_time=1)
 
 
-# 云端保活服务器
+# 云端端口守卫
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot is fully alive with database!")
+        self.wfile.write(b"Slot machine game is up!")
 
     def log_message(self, format, *args):
         return
@@ -265,9 +263,7 @@ def run_health_server(port):
 
 
 def main():
-    # 启动时初始化本地数据库
     init_db()
-
     from telegram.request import HTTPXRequest
     custom_request = HTTPXRequest(read_timeout=60.0, write_timeout=60.0, connect_timeout=60.0)
     app = Application.builder().token(BOT_TOKEN).request(custom_request).build()
@@ -277,7 +273,6 @@ def main():
     app.add_handler(InlineQueryHandler(inline_query_handler))
 
     if IS_LOCAL:
-        print("🚀 本地数据库版安全轮询模式启动成功...")
+        print("🚀 本地老虎机娱乐城启动成功...")
         app.run_polling()
     else:
-        PORT = int(os.environ.get("PORT", 8443))
