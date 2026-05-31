@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import sqlite3
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, \
     InputTextMessageContent
 from telegram.error import BadRequest
@@ -96,14 +97,16 @@ def add_user_energy(user_id, amount):
 
 # ====================================================================
 
-# 输入 /start 启动
+# 输入 /start 启动（每次大号发 /start 都会彻底清洗历史数据库进度，方便反复测试）
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name
 
-        energy, _ = get_or_create_user(user_id)
+        # 💡 核心修复：重置当前用户的点击数和能量，确保重新开始玩
+        update_user_click(user_id, 0, 20)
 
+        # 检查是否是别人点击链接进来的助力
         if context.args:
             try:
                 referrer_id = int(context.args)
@@ -115,7 +118,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                         notify_text = (
                             "🔔 【裂变助力报喜】\n"
                             "──────────────────\n"
-                            f"✨ 您的好友【{user_name}】已为您助力成功！\n\n"
+                            f"✨ 您的好友【{user_name}】已通过您分享的卡片成功加入！\n\n"
                             "🎁 恭喜获得：+10 抽奖能量！\n"
                             "📈 提现进度已更新为：【99.995%】！\n\n"
                             "⚡ 能量已到账，快点击下方按钮继续开盘！"
@@ -135,7 +138,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🔥 【官方至尊娱乐城 · 福利回馈】\n"
             "──────────────────\n"
             f"👑 欢迎入场！尊贵的会员【{user_name}】\n"
-            f"🔋 当前可用幸运能量：{energy} 点\n\n"
+            f"🔋 当前可用幸运能量：20 点\n\n"
             "🎁 头等大奖：iPhone 16 Pro Max 现金券（100%必中）\n"
             "👇 赶快点击下方按钮，摇动你的超级老虎机吧！"
         )
@@ -144,7 +147,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logging.error(f"Start运行错误: {e}")
 
 
-# 老虎机点击与判定
+# 老虎机点击与判定（包含 send_dice 特效动画）
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
@@ -153,6 +156,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         energy, count = get_or_create_user(user_id)
         count += 1
 
+        # 🕹️ 第一次点击：启动第一台老虎机
         if count == 1:
             await query.answer(text="🎰 老虎机正在疯狂旋转中...")
             try:
@@ -160,8 +164,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 pass
 
+            # 发送 Telegram 原生的会翻滚的老虎机动画！
             await context.bot.send_dice(chat_id=query.message.chat_id, emoji="slot_machine")
-            await asyncio.sleep(2.5)
+            await asyncio.sleep(2.5)  # 等待动画转完
 
             energy = max(0, energy - 10)
             update_user_click(user_id, count, energy)
@@ -178,9 +183,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                            reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
+        # 🕹️ 第二次点击：启动第二台老虎机，爆出头等大奖加彩带特效
         elif count == 2:
             if energy < 10:
-                count = 3
+                count = 3  # 能量不够自动跳到卡关分支
             else:
                 await query.answer(text="🎰 翻倍卡已激活！正在为您锁定中奖图案...")
                 try:
@@ -194,8 +200,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 energy = max(0, energy - 10)
                 update_user_click(user_id, count, energy)
 
+                # 触发满屏炸彩带的全局动效提示
                 await context.bot.send_message(chat_id=query.message.chat_id,
-                                               text="🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉\n🎰 恭喜！老虎机大奖已爆出！ 🎰")
+                                               text="🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉\n🎰 恭喜！老虎机特等奖已爆出！ 🎰")
 
                 text = (
                     "🎉 🎉【恭喜斩获至尊特等奖】🎉 🎉\n"
@@ -211,6 +218,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                                reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
+        # 🕹️ 第三次点击及以上：能量耗尽，卡死 99.99% 强推一键分享裂变
         if count >= 3:
             update_user_click(user_id, count, energy)
             await query.answer(text="❌ 槽位能量耗尽！提现已被锁定在 99.99%！", show_alert=True)
@@ -239,7 +247,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logging.error(f"按钮异常: {button_err}")
 
 
-# ✅ 括号问题已在此处完美补齐修复！
+# 内联分享卡片处理器
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user_id = update.inline_query.from_user.id
@@ -252,15 +260,3 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineQueryResultArticle(
                 id="pdd_share",
                 title="🎁 点击发送至尊老虎机中奖助力卡片",
-                input_message_content=InputTextMessageContent(message_content),
-                description="点击即可将你的专属老虎机中奖助力卡片发送给当前好友或群聊"
-            )
-        ]
-        await update.inline_query.answer(results, cache_time=1)
-    except Exception as e:
-        logging.error(f"转发异常: {e}")
-
-
-def main():
-    init_db()
-
