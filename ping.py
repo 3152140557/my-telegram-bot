@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import asyncio
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, \
@@ -24,7 +25,10 @@ else:
     print("🌐 云端运行：正在启动 Linux 守护进程环境...")
 # ========================================================
 
+# 1. 机器人 Token
 BOT_TOKEN = "8729999872:AAFF_-vzc4fpXoe1MpCPDRtEctEkmcjtkDE"
+
+# 2. 你的机器人用户名（⚠️ 必须和 BotFather 里的完全一模一样，不带 @ 符号）
 BOT_USERNAME = "Lottery_robot8_bot"
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -63,6 +67,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     count = context.user_data['click_count']
 
+    # 🔴 第一次点击：弹出中奖提示，手机全屏炸开满屏彩带
     if count == 1:
         await query.answer(text="🎉 🎉 🎉 恭喜你中奖啦！！！ 🎉 🎉 🎉")
         await query.message.reply_text("🎊 🎊 🎊 🎊 🎊 🎊 🎊 🎊\n🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉")
@@ -82,6 +87,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.delete_message()
         except BadRequest:
             pass
+
+    # 🔴 第二次点击：卡点 99.99%
     elif count == 2:
         await query.answer(text="⚡ 正在为您疯狂暴击中...")
         text = (
@@ -98,6 +105,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await query.edit_message_text(text=text, reply_markup=reply_markup)
         except BadRequest:
             pass
+
+    # 🔴 第三次及以上点击：拼多多专属终极卡点套路，手机正中央弹出强力警告窗
     else:
         await query.answer(text="❌ 今日抽奖能量耗尽！由于进度高达99.99%，提现已被暂时锁定！", show_alert=True)
         share_url = create_deep_linked_url(BOT_USERNAME, str(user_id))
@@ -120,7 +129,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pass
 
 
-# 内联卡片转发
+# 内联卡片转发监听器
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.inline_query.from_user.id
     share_url = create_deep_linked_url(BOT_USERNAME, str(user_id))
@@ -139,7 +148,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.inline_query.answer(results, cache_time=1)
 
 
-# 💡 云端保活专属：创建一个超轻量的极速网页服务器响应 Render 端口检查
+# 💡 云端保活专用：极其轻量的网页服务器响应 Render 端口检查
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -148,7 +157,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is fully alive!")
 
     def log_message(self, format, *args):
-        return  # 隐藏心跳日志，保持控制台干净
+        return  # 隐藏干扰请求，保持日志干净
 
 
 def run_health_server(port):
@@ -157,6 +166,7 @@ def run_health_server(port):
     server.serve_forever()
 
 
+# 3. 程序总入口
 def main():
     from telegram.request import HTTPXRequest
     custom_request = HTTPXRequest(read_timeout=60.0, write_timeout=60.0, connect_timeout=60.0)
@@ -170,12 +180,14 @@ def main():
         print("🚀 本地安全轮询模式启动成功...")
         app.run_polling()
     else:
-        # 1. 动态读取云端端口，在子线程中拉起网页守卫，死死咬住 Render 的生命线
+        # 1. 动态读取云端分配的端口，拉起后台网页守卫，满足 Render 的网络检查需求
         PORT = int(os.environ.get("PORT", 8443))
         threading.Thread(target=run_health_server, args=(PORT,), daemon=True).start()
 
-        # 2. 主线程启动百分之百免疫网络环境干扰的 Polling 监听，彻底告别线程崩溃！
-        print("🚀 云端生产守护 Polling 模式成功上线！")
+        # 2. 显式初始化全新的事件循环，彻底根除 'There is no current event loop' 崩溃
+        print("🚀 云端显式异步事件循环 Polling 模式成功上线！")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         app.run_polling(close_loop=False)
 
 
