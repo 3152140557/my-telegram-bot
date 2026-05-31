@@ -1,10 +1,7 @@
 import os
 import sys
 import logging
-import asyncio
-import threading
 import sqlite3
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, \
     InputTextMessageContent
 from telegram.error import BadRequest
@@ -23,7 +20,7 @@ if IS_LOCAL:
         os.environ["https_proxy"] = proxies['https']
         print(f"⚙️ 本地调试：成功自动捕获系统代理地址: {proxies['https']}")
 else:
-    print("🌐 云端运行：正在启动 Linux 守护进程环境...")
+    print("🌐 云端运行：正在启动 Linux Webhook 生产环境...")
 # ========================================================
 
 BOT_TOKEN = "8729999872:AAFF_-vzc4fpXoe1MpCPDRtEctEkmcjtkDE"
@@ -67,7 +64,7 @@ def get_or_create_user(user_id):
         return energy, click_count
     except Exception as e:
         logging.error(f"数据库读取失败: {e}")
-        return 20, 0  # 降级容错方案
+        return 20, 0
 
 
 def update_user_click(user_id, new_count, new_energy):
@@ -107,7 +104,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         energy, _ = get_or_create_user(user_id)
 
-        # 裂变检测
         if context.args:
             try:
                 referrer_id = int(context.args)
@@ -145,10 +141,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         await update.message.reply_text(text=welcome_text, reply_markup=reply_markup)
     except Exception as e:
-        logging.error(f"Start指令内运行发生未知错误: {e}")
+        logging.error(f"Start运行错误: {e}")
 
 
-# 核心小游戏与点击判定逻辑（强力容错版）
+# 老虎机点击与判定
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     user_id = query.from_user.id
@@ -157,7 +153,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         energy, count = get_or_create_user(user_id)
         count += 1
 
-        # 🕹️ 第一次摇老虎机
         if count == 1:
             await query.answer(text="🎰 老虎机正在疯狂旋转中...")
             try:
@@ -183,7 +178,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                            reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
-        # 🕹️ 第二次摇老虎机
         elif count == 2:
             if energy < 10:
                 count = 3
@@ -217,7 +211,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                                reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
-        # 🕹️ 第三次点击及以上
         if count >= 3:
             update_user_click(user_id, count, energy)
             await query.answer(text="❌ 槽位能量耗尽！提现已被锁定在 99.99%！", show_alert=True)
@@ -243,14 +236,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 await context.bot.send_message(chat_id=query.message.chat_id, text=text, reply_markup=reply_markup)
     except Exception as button_err:
-        logging.error(f"按钮处理分支抛出异常(已捕获守护): {button_err}")
-        try:
-            await query.answer(text="⚠️ 网络繁忙，请重新点击测试！")
-        except Exception:
-            pass
+        logging.error(f"按钮异常: {button_err}")
 
 
-# 内联卡片一键转发
+# ✅ 括号问题已在此处完美补齐修复！
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user_id = update.inline_query.from_user.id
@@ -263,3 +252,15 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineQueryResultArticle(
                 id="pdd_share",
                 title="🎁 点击发送至尊老虎机中奖助力卡片",
+                input_message_content=InputTextMessageContent(message_content),
+                description="点击即可将你的专属老虎机中奖助力卡片发送给当前好友或群聊"
+            )
+        ]
+        await update.inline_query.answer(results, cache_time=1)
+    except Exception as e:
+        logging.error(f"转发异常: {e}")
+
+
+def main():
+    init_db()
+
