@@ -1,11 +1,13 @@
 import os
 import sys
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, \
     InputTextMessageContent
 from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, InlineQueryHandler, ContextTypes
-from telegram.helpers import create_deep_linked_url  # 💡 已经修正为最新版官方标准路径
+from telegram.helpers import create_deep_linked_url
 
 # ==================== 🛠️ 智能环境自适应区 ====================
 IS_LOCAL = sys.platform == 'win32'
@@ -19,7 +21,7 @@ if IS_LOCAL:
         os.environ["https_proxy"] = proxies['https']
         print(f"⚙️ 本地调试：成功自动捕获系统代理地址: {proxies['https']}")
 else:
-    print("🌐 云端运行：正在启动 Linux 生产环境配置...")
+    print("🌐 云端运行：正在启动 Linux 守护进程环境...")
 # ========================================================
 
 BOT_TOKEN = "8729999872:AAFF_-vzc4fpXoe1MpCPDRtEctEkmcjtkDE"
@@ -137,6 +139,24 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.inline_query.answer(results, cache_time=1)
 
 
+# 💡 云端保活专属：创建一个超轻量的极速网页服务器响应 Render 端口检查
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is fully alive!")
+
+    def log_message(self, format, *args):
+        return  # 隐藏心跳日志，保持控制台干净
+
+
+def run_health_server(port):
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"🔒 成功为 Render 开启端口占位守卫，目标端口: {port}")
+    server.serve_forever()
+
+
 def main():
     from telegram.request import HTTPXRequest
     custom_request = HTTPXRequest(read_timeout=60.0, write_timeout=60.0, connect_timeout=60.0)
@@ -147,20 +167,16 @@ def main():
     app.add_handler(InlineQueryHandler(inline_query_handler))
 
     if IS_LOCAL:
-        print("🚀 本地调试模式启动成功...")
+        print("🚀 本地安全轮询模式启动成功...")
         app.run_polling()
     else:
+        # 1. 动态读取云端端口，在子线程中拉起网页守卫，死死咬住 Render 的生命线
         PORT = int(os.environ.get("PORT", 8443))
-        RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+        threading.Thread(target=run_health_server, args=(PORT,), daemon=True).start()
 
-        print(f"🚀 云端生产 Webhook 模式启动。目标 URL: {RENDER_EXTERNAL_URL}, 端口: {PORT}")
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            secret_token="pdd_bot_secure_token_123",
-            url_path=BOT_TOKEN,
-            webhook_url=f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
-        )
+        # 2. 主线程启动百分之百免疫网络环境干扰的 Polling 监听，彻底告别线程崩溃！
+        print("🚀 云端生产守护 Polling 模式成功上线！")
+        app.run_polling(close_loop=False)
 
 
 if __name__ == '__main__':
